@@ -1,0 +1,23 @@
+streamlit==1.52.2
+
+# Computer Vision
+opencv-python-headless
+
+# Deep Learning / YOLO
+ultralytics
+torch
+torchvision
+
+# Data handling
+numpy
+pandas
+
+# Visualization
+matplotlib
+
+# SMS alerts
+twilio
+
+# Utilities (usually auto-installed, but safe to include)
+Pillow
+python-dateutil
