@@ -1,23 +1,19 @@
 streamlit==1.52.2
 
-# Computer Vision
+# OpenCV (Cloud safe)
 opencv-python-headless
 
-# Deep Learning / YOLO
-ultralytics
-torch
-torchvision
+# YOLO + Torch (Python 3.10 compatible)
+torch==2.2.2
+torchvision==0.17.2
+ultralytics==8.1.0
 
-# Data handling
+# Data & utils
 numpy
 pandas
-
-# Visualization
 matplotlib
-
-# SMS alerts
-twilio
-
-# Utilities (usually auto-installed, but safe to include)
 Pillow
 python-dateutil
+
+# SMS
+twilio
