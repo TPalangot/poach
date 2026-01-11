@@ -1,19 +1,13 @@
 streamlit==1.52.2
 
-# OpenCV (Cloud safe)
 opencv-python-headless
 
-# YOLO + Torch (Python 3.10 compatible)
-torch==2.2.2
-torchvision==0.17.2
-ultralytics==8.1.0
+ultralytics
 
-# Data & utils
 numpy
 pandas
 matplotlib
 Pillow
 python-dateutil
 
-# SMS
 twilio
