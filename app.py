@@ -35,7 +35,7 @@ def send_sms_alert(message):
 # ============================
 # Load YOLO Model
 # ============================
-model_path = r"D:\majornew\Major\Major\runs\detect\train11\weights\best.pt"
+model_path = r"runs\detect\train11\weights\best.pt"
 
 if not os.path.exists(model_path):
     st.error(f"YOLO model not found at {model_path}")
