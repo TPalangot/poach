@@ -2,246 +2,276 @@ import streamlit as st
 import cv2
 import os
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 from ultralytics import YOLO
 from twilio.rest import Client
+from streamlit_webrtc import webrtc_streamer
+import av
 
+# ============================
 # Database imports
-from database import initialize_database, save_detection, fetch_detections, clear_detections, add_user, verify_user
-
+# ============================
+from database import (
+    initialize_database,
+    save_detection,
+    fetch_detections,
+    clear_detections,
+    add_user,
+    verify_user
+)
 
 # ============================
-# Twilio Configuration
-# ============================
-account_sid = 'AC0e02890ff0e74589d760838a92b1d1b7'
-auth_token = '3f51606d55ed606e7850558cbbba4437'
-twilio_number = '+18444825976'
-your_phone_number = '+916363656664'
-
-client = Client(account_sid, auth_token)
-
-
-def send_sms_alert(message):
-    try:
-        msg = client.messages.create(body=message, from_=twilio_number, to=your_phone_number)
-        return msg.sid
-    except Exception as e:
-        st.error(f"Failed to send SMS: {e}")
-        return None
-
-
-# ============================
-# Load YOLO Model
-# ============================
-model_path = r"runs/detect/train11/weights/best.pt"
-
-if not os.path.exists(model_path):
-    st.error(f"YOLO model not found at {model_path}")
-else:
-    model = YOLO(model_path)
-
-# Initialize DB
-initialize_database()
-
-
-# ============================
-# Streamlit App Setup
+# Streamlit Config
 # ============================
 st.set_page_config(page_title="Anti-Poaching System", layout="wide")
 
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
+# ============================
+# Twilio (Environment Variables)
+# ============================
+TWILIO_SID = os.getenv("TWILIO_SID")
+TWILIO_AUTH = os.getenv("TWILIO_AUTH")
+TWILIO_FROM = os.getenv("TWILIO_FROM")
+TWILIO_TO = os.getenv("TWILIO_TO")
 
+client = Client(TWILIO_SID, TWILIO_AUTH) if TWILIO_SID else None
+
+def send_sms_alert(message):
+    if client is None:
+        return None
+    try:
+        msg = client.messages.create(
+            body=message,
+            from_=TWILIO_FROM,
+            to=TWILIO_TO
+        )
+        return msg.sid
+    except Exception:
+        return None
+
+# ============================
+# Load YOLO Model (Cached)
+# ============================
+MODEL_PATH = "runs/detect/train11/weights/best.pt"
+
+@st.cache_resource
+def load_model():
+    return YOLO(MODEL_PATH)
+
+model = load_model()
+
+# ============================
+# Init Database
+# ============================
+initialize_database()
+
+# ============================
+# Session State
+# ============================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if "last_alert_time" not in st.session_state:
+    st.session_state.last_alert_time = None
+
+# ============================
+# Sidebar Menu
+# ============================
 st.sidebar.title("Navigation")
 
 menu = st.sidebar.selectbox(
     "Menu",
-    ["Login", "Sign Up"] if not st.session_state["authenticated"]
-    else ["Home", "Dashboard", "Database", "Hash Map", "Logout"]
+    ["Login", "Sign Up"] if not st.session_state.authenticated
+    else ["Home", "Dashboard", "Database", "Heat Map", "Logout"]
 )
-
 
 # ============================
 # LOGIN
 # ============================
-if menu == "Login" and not st.session_state["authenticated"]:
+if menu == "Login" and not st.session_state.authenticated:
     st.subheader("🔐 Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if verify_user(username, password):
-            st.success("Login Successful!")
-            st.session_state["authenticated"] = True
-            st.session_state["username"] = username
+        if verify_user(u, p):
+            st.session_state.authenticated = True
+            st.success("Login successful")
         else:
             st.error("Invalid credentials")
-
 
 # ============================
 # SIGN UP
 # ============================
-elif menu == "Sign Up" and not st.session_state["authenticated"]:
-    st.subheader("📝 Create New Account")
-
-    new_user = st.text_input("New Username")
-    new_pass = st.text_input("Password", type="password")
-    conf_pass = st.text_input("Confirm Password", type="password")
+elif menu == "Sign Up" and not st.session_state.authenticated:
+    st.subheader("📝 Create Account")
+    u = st.text_input("New Username")
+    p1 = st.text_input("Password", type="password")
+    p2 = st.text_input("Confirm Password", type="password")
 
     if st.button("Sign Up"):
-        if new_pass == conf_pass:
-            add_user(new_user, new_pass)
-            st.success("Account created successfully! Go to Login.")
+        if p1 == p2:
+            add_user(u, p1)
+            st.success("Account created")
         else:
-            st.error("Passwords do not match!")
-
+            st.error("Passwords do not match")
 
 # ============================
 # LOGOUT
 # ============================
 elif menu == "Logout":
-    st.session_state["authenticated"] = False
-    st.success("Logged out successfully!")
+    st.session_state.authenticated = False
     st.stop()
 
-
 # ============================
-# HOME PAGE
+# HOME
 # ============================
-elif menu == "Home" and st.session_state["authenticated"]:
+elif menu == "Home" and st.session_state.authenticated:
     st.title("🦌 Anti-Poaching Detection System")
     st.markdown("""
-    This system uses **YOLO-based deep learning** to detect poachers in real time.
-
-    **Features:**
-    - Live Camera Detection  
-    - Video File Detection  
-    - Automatic SMS Alerts  
-    - Detection Storage in Database  
-    - Weekly Heat Map (Hash Map)  
+    **Features**
+    - Live Camera Detection (Browser Webcam)
+    - Video Upload Detection
+    - YOLO-based Poacher Detection
+    - SMS Alerts
+    - Database Storage
+    - Weekly Heatmap Analysis
     """)
 
+# ============================
+# DASHBOARD
+# ============================
+elif menu == "Dashboard" and st.session_state.authenticated:
+    st.title("🎥 Detection Dashboard")
 
-# ============================
-# DETECTION PAGE
-# ============================
-elif menu == "Dashboard" and st.session_state["authenticated"]:
-    st.title("🎥 Poacher Detection Dashboard")
+    POACHER_CLASS_ID = 0
+    ALERT_COOLDOWN = 60  # seconds
+
+    def handle_detection(annotated, count):
+        if count <= 0:
+            return
+
+        now = datetime.now()
+
+        if (
+            st.session_state.last_alert_time is None or
+            (now - st.session_state.last_alert_time).seconds > ALERT_COOLDOWN
+        ):
+            send_sms_alert(
+                f"🚨 Poacher detected at {now.strftime('%Y-%m-%d %H:%M:%S')} | Count: {count}"
+            )
+
+            _, img_enc = cv2.imencode(".jpg", annotated)
+            save_detection(
+                now.strftime('%Y-%m-%d %H:%M:%S'),
+                count,
+                img_enc.tobytes()
+            )
+
+            st.session_state.last_alert_time = now
 
     mode = st.radio("Select Mode", ["Live Camera", "Upload Video"])
 
-    def detect_and_display(input_source):
-        cap = cv2.VideoCapture(input_source)
-        stframe = st.empty()
-        sms_log = st.empty()
+    # ---------- LIVE CAMERA (WebRTC) ----------
+    if mode == "Live Camera":
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+        def video_frame_callback(frame):
+            img = frame.to_ndarray(format="bgr24")
 
-            results = model(frame)
-            detected_classes = results[0].boxes.cls.cpu().numpy()
-            class_0 = (detected_classes == 0).sum()
+            results = model.predict(img, conf=0.5, device="cpu", verbose=False)
+            boxes = results[0].boxes
+            detected = boxes.cls.cpu().numpy() if boxes else []
+            count = int((detected == POACHER_CLASS_ID).sum())
 
             annotated = results[0].plot()
+            handle_detection(annotated, count)
 
-            # Save and send alerts
-            if class_0 > 0:
-                t = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
-                sid = send_sms_alert(f"🚨 Poacher detected at {t} — Count: {class_0}")
-                sms_log.write(f"SMS Alert Sent! SID: {sid}")
+        webrtc_streamer(
+            key="live",
+            video_frame_callback=video_frame_callback,
+            media_stream_constraints={"video": True, "audio": False},
+        )
 
-                _, img_encoded = cv2.imencode(".jpg", annotated)
-                save_detection(t, int(class_0), img_encoded.tobytes())
+    # ---------- VIDEO UPLOAD ----------
+    else:
+        video = st.file_uploader("Upload video", type=["mp4", "avi", "mov"])
 
-            stframe.image(annotated, channels="BGR")
-
-        cap.release()
-
-    if mode == "Upload Video":
-        video = st.file_uploader("Upload a video file", type=["mp4", "avi", "mov"])
         if video:
-            with open("uploaded_video.mp4", "wb") as f:
+            with open("input.mp4", "wb") as f:
                 f.write(video.read())
 
             if st.button("Start Detection"):
-                detect_and_display("uploaded_video.mp4")
+                cap = cv2.VideoCapture("input.mp4")
+                frame_box = st.empty()
 
-    else:
-        if st.button("Start Live Camera Detection"):
-            detect_and_display(0)
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
+                    results = model.predict(frame, conf=0.5, device="cpu", verbose=False)
+                    boxes = results[0].boxes
+                    detected = boxes.cls.cpu().numpy() if boxes else []
+                    count = int((detected == POACHER_CLASS_ID).sum())
+
+                    annotated = results[0].plot()
+                    handle_detection(annotated, count)
+
+                    frame_box.image(annotated, channels="BGR")
+
+                cap.release()
 
 # ============================
-# DATABASE PAGE
+# DATABASE
 # ============================
-elif menu == "Database" and st.session_state["authenticated"]:
-    st.title("📁 Poacher Detection Records")
+elif menu == "Database" and st.session_state.authenticated:
+    st.title("📁 Detection Records")
 
-    detections = fetch_detections()
+    data = fetch_detections()
+    if not data:
+        st.info("No records found")
 
-    if len(detections) == 0:
-        st.info("No detections recorded yet.")
-    else:
-        for id, ts, count, img_blob in detections:
-            st.markdown(f"### Detection ID: {id}")
-            st.write(f"**Time:** {ts}")
-            st.write(f"**Count:** {count}")
+    for id, ts, count, img_blob in data:
+        st.markdown(f"### Detection {id}")
+        st.write(f"Time: {ts}")
+        st.write(f"Count: {count}")
+        img = cv2.imdecode(np.frombuffer(img_blob, np.uint8), cv2.IMREAD_COLOR)
+        st.image(img, channels="BGR")
+        st.markdown("---")
 
-            img = cv2.imdecode(np.frombuffer(img_blob, np.uint8), cv2.IMREAD_COLOR)
-            st.image(img, channels="BGR")
-
-            st.markdown("---")
-
-    if st.button("Clear All Data"):
+    if st.button("Clear Database"):
         clear_detections()
-        st.success("All records cleared!")
-
+        st.success("Database cleared")
 
 # ============================
-# HASH MAP PAGE (WITHOUT SEABORN)
+# HEAT MAP
 # ============================
-elif menu == "Hash Map" and st.session_state["authenticated"]:
-    st.title("📊 Weekly Poacher Detection Heatmap (7×8 Grid)")
+elif menu == "Heat Map" and st.session_state.authenticated:
+    st.title("📊 Weekly Poacher Detection Heatmap")
 
-    raw = fetch_detections()
+    records = fetch_detections()
     grid = np.zeros((7, 8))
 
-    for _, ts, count, _ in raw:
+    for _, ts, count, _ in records:
         dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-        day = dt.weekday()
-        interval = dt.hour // 3
+        grid[dt.weekday(), dt.hour // 3] += int(count)
 
-        try:
-            count = int(count)
-        except:
-            count = 0
-
-        grid[day, interval] += count
-
-    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-    intervals = ['0-3', '3-6', '6-9', '9-12', '12-15', '15-18', '18-21', '21-24']
+    days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    slots = ["0-3", "3-6", "6-9", "9-12", "12-15", "15-18", "18-21", "21-24"]
 
     fig, ax = plt.subplots(figsize=(10, 4))
+    im = ax.imshow(grid, aspect="auto")
+    plt.colorbar(im, ax=ax, label="Detections")
 
-    heatmap = ax.imshow(grid, aspect='auto')
-
-    cbar = plt.colorbar(heatmap)
-    cbar.set_label("Detection Count", rotation=270, labelpad=15)
-
-    ax.set_xticks(np.arange(len(intervals)))
-    ax.set_yticks(np.arange(len(days)))
-    ax.set_xticklabels(intervals)
+    ax.set_xticks(range(8))
+    ax.set_yticks(range(7))
+    ax.set_xticklabels(slots)
     ax.set_yticklabels(days)
 
-    for i in range(len(days)):
-        for j in range(len(intervals)):
-            ax.text(j, i, int(grid[i, j]), ha='center', va='center', color='black')
-
-    ax.set_title("Weekly Poacher Detection Heatmap (Matplotlib Only)")
+    for i in range(7):
+        for j in range(8):
+            ax.text(j, i, int(grid[i, j]), ha="center", va="center")
 
     st.pyplot(fig)
