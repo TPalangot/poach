@@ -214,6 +214,7 @@ elif menu == "Dashboard" and st.session_state.authenticated:
                     results = model.predict(frame, conf=0.5, device="cpu", verbose=False)
                     boxes = results[0].boxes
                     detected = boxes.cls.cpu().numpy() if boxes else []
+                    detected = results[0].boxes.cls.cpu().numpy()
                     count = int((detected == POACHER_CLASS_ID).sum())
 
                     annotated = results[0].plot()
